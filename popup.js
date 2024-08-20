@@ -53,7 +53,7 @@ function renderPopup({ selectedMicName, mics }) {
         }
         button.addEventListener("click", () => {
             selectedMicName = mic.label
-            chrome.storage.local.set({ selectedMicName: mic.label });
+            chrome.storage.local.set({ selectedMicName: mic.label, selectedMicId: mic.id });
             renderPopup({ selectedMicName, mics })
         })
         root.append(button)

@@ -1,10 +1,10 @@
 
-async function withExponentialBackoff({ fn, maxRetries = 6, delay = 50 }) {
+async function withExponentialBackoff({ fn, maxRetries = 4, delay = 50 }) {
     try {
         const result = await fn();
         return result;
     } catch (error) {
-        if (maxRetries === 0) {
+        if (maxRetries == 0) {
             throw error;
         } else {
             const nextDelay = delay * 2;
@@ -28,23 +28,23 @@ const clickEvent = new MouseEvent("click", {
 
     let data = await chrome.storage.local.get(["selectedMicName", "mics"])
 
-    let { selectedMicName, mics } = data
+    let { selectedMicName, selectedMicId, mics } = data
 
     if (!mics) {
         await updateDeviceList()
     } else {
-        await setMic(selectedMicName)
+        await setMic({ micName: selectedMicName, micId: selectedMicId })
     }
 
     // When you put your earbuds or headphones on in the middle of a call, your chosen mic will be selected again for you after a few seconds.
-    
+
     let eventHandled = false
 
     navigator.mediaDevices.ondevicechange = async (event) => {
         if (!eventHandled) {
             eventHandled = true
             setTimeout(async () => {
-                await setMic(selectedMicName)
+                await setMic({ micName: selectedMicName, micId: selectedMicId })
             }, 3000)
 
             setTimeout(() => {
@@ -73,43 +73,71 @@ async function updateDeviceList() {
     }
 }
 
-async function setMic(micName) {
+async function setMic({ micName, micId }) {
 
     if (!micName) {
         return
     }
 
-    await withExponentialBackoff({
-        fn: clickMoreOptionsButton
-    })
+    try {
 
-    await withExponentialBackoff({
-        fn: clickSettingsButton
-    })
+        // Mic selector is available directly on lobby page in big screens
 
-    await withExponentialBackoff({
-        fn: async function () {
-            await delay(700)
-            await clickMicrophoneSelector()
-        }
-    })
+        await withExponentialBackoff({
+            fn: async function () {
+                await clickMicrophoneSelector()
+            },
+            maxRetries: 2
+        })
 
-    await withExponentialBackoff({
-        fn: async function () {
-            await delay(200)
-            await clickDesiredMic(micName)
-        }
-    })
+        await withExponentialBackoff({
+            fn: async function () {
+                await delay(200)
+                await clickDesiredMic({ micName, micId })
+            }
+        })
 
-    await withExponentialBackoff({
-        fn: async function () {
-            await checkIfDesiredMicSelected(micName)
-        }
-    })
+        await withExponentialBackoff({
+            fn: async function () {
+                await checkIfDesiredMicSelected(micName)
+            }
+        })
+    } catch (err) {
 
-    await withExponentialBackoff({
-        fn: closeDialog
-    })
+        // Otherwise open the full settings menu
+
+        await withExponentialBackoff({
+            fn: clickMoreOptionsButton
+        })
+
+        await withExponentialBackoff({
+            fn: clickSettingsButton
+        })
+
+        await withExponentialBackoff({
+            fn: async function () {
+                await delay(700)
+                await clickMicrophoneSelector()
+            }
+        })
+
+        await withExponentialBackoff({
+            fn: async function () {
+                await delay(200)
+                await clickDesiredMic({ micName, micId })
+            }
+        })
+
+        await withExponentialBackoff({
+            fn: async function () {
+                await checkIfDesiredMicSelected(micName)
+            }
+        })
+
+        await withExponentialBackoff({
+            fn: closeDialog
+        })
+    }
 }
 
 // Functions for interacting with the DOM
@@ -122,7 +150,7 @@ async function clickMoreOptionsButton() {
     let moreActionsButton
 
     // Chat and participants buttons are hidden under another more options button on small screens
-    
+
     if (window.innerWidth < 600 && isInCall) {
         moreActionsButton = moreActionsButtons.at(-2)
     } else {
@@ -149,7 +177,7 @@ async function clickSettingsButton() {
 }
 
 async function clickMicrophoneSelector() {
-    let micSelector = document.querySelector("div[data-aria-label='Select Microphone'] > div > div > div")
+    let micSelector = document.querySelector("[aria-label*='Microphone']")
 
     if (!micSelector) {
         throw new Error('Mic selector not found')
@@ -158,11 +186,17 @@ async function clickMicrophoneSelector() {
     micSelector.dispatchEvent(clickEvent)
 }
 
-async function clickDesiredMic(micName) {
-    let selector = `li[aria-label*='${micName}']`
-
-    let micOption = document.querySelector(selector)
-
+async function clickDesiredMic({ micName, micId }) {
+    let selector, micOption
+    if (micId) {
+        selector = `li[data-device-id='${micId}']`
+        micOption = document.querySelector(selector)
+    }
+    if (!micOption) {
+        selector = '[data-device-id]'
+        let options = document.querySelectorAll(selector)
+        micOption = Array.from(options).find(el => el.innerText.includes(micName))
+    }
     if (!micOption) {
         throw new Error('Mic selector not found')
     }
@@ -181,9 +215,10 @@ async function closeDialog() {
 }
 
 async function checkIfDesiredMicSelected(micName) {
-    let builtInSelected = document.querySelector("div[data-aria-label='Select Microphone'] > div > div > div > span:nth-of-type(2) > span")
+    // let builtInSelected = document.querySelector("div[data-aria-label='Select Microphone'] > div > div > div > span:nth-of-type(2) > span")
+    let micSelector = document.querySelector("[aria-label*='Microphone']")
 
-    if (!builtInSelected?.innerText?.includes(micName)) {
+    if (!micSelector?.innerText?.includes(micName)) {
         throw new Error('Desired mic not selected')
     }
 }
